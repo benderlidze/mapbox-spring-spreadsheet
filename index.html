@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Create a hover effect</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.11.0/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.11.0/mapbox-gl.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        #infoDiv {
+            font: 16px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+            background-color: #fff;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            border-radius: 3px;
+            position: absolute;
+            width: fit-content;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            z-index: 100;
+        }
+
+
+        .switcher-div {
+            display: flex;
+            align-items: center;
+            margin: 5px;
+        }
+
+        .switcher-div>div {
+            margin-left: 5px;
+        }
+
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 35px;
+            height: 15px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            -webkit-transition: 0.4s;
+            transition: 0.4s;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 11px;
+            width: 11px;
+            left: 3px;
+            bottom: 2px;
+            background-color: white;
+            -webkit-transition: 0.4s;
+            transition: 0.4s;
+        }
+
+        input:checked+.slider {
+            background-color: #2196f3;
+        }
+
+        input:focus+.slider {
+            box-shadow: 0 0 1px #2196f3;
+        }
+
+        input:checked+.slider:before {
+            -webkit-transform: translateX(18px);
+            -ms-transform: translateX(18px);
+            transform: translateX(18px);
+        }
+
+        /* Rounded sliders */
+        .slider.round {
+            border-radius: 34px;
+        }
+
+        .slider.round:before {
+            border-radius: 50%;
+        }
+
+        #loading {
+            background-color: white;
+            position: absolute;
+            border-radius: 10px;
+            z-index: 10;
+            padding: 20px;
+            font-size: 20px;
+
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .mapboxgl-popup {
+            max-width: 350px !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <div id="infoDiv"></div>
+    <script>
+        const switchersEnableDiv = document.getElementById("infoDiv")
+
+        const main = {
+            states: [],
+            regions: [],
+            filters: new Set(),
+            cities: []
+        }
+
+        mapboxgl.accessToken = 'pk.eyJ1Ijoic2VyZ2JlciIsImEiOiJja3dwOWgzeGQwYWdyMm9xb2pkMDFvYmNuIn0.H9AJ_NLmDNYMed6dvu_Q0A';
+        const map = new mapboxgl.Map({
+            container: 'map',
+            // Choose from Mapbox's core styles, or make your own style with Mapbox Studio
+            style: 'mapbox://styles/mapbox/streets-v11',
+            center: { lng: -95.17778973824447, lat: 39.77200546199836 },
+            zoom: 0
+        });
+        let hoveredStateId = null;
+        map.addControl(new mapboxgl.NavigationControl());
+
+        switchersEnableDiv.appendChild(buildSwitcher("Satellite", checked => {
+            const display = checked ? "visible" : "none"
+            map.setLayoutProperty('satellite', 'visibility', display);
+        }, false))
+
+
+        map.on('load', () => {
+
+            map.addLayer({
+                id: 'satellite',
+                source: { "type": "raster", "url": "mapbox://mapbox.satellite", "tileSize": 256 },
+                type: "raster",
+                layout: {
+                    visibility: 'none'
+                }
+            });
+
+            //https://docs.google.com/spreadsheets/d/e/2PACX-1vR7uJJ_LhOqmxklKh3SsvCdKAe7qpB8ILFLHCd_11D5lKN8bNZ3k2VCIXtzNG3QuyQj_XguuRqsK4AH/pub?gid=547576532&single=true&output=csv
+            d3.csv("https://docs.google.com/spreadsheets/d/e/2PACX-1vSjpWHb9aSPosAHED17_H2vHT6Qj3f0hZFAt84U8RjyzcU7KTZWZIUtGJt7fDk1kbxeRjnCNqeGxsAo/pub?output=csv")
+                .then(data => {
+                    console.log('data', data);
+                    main.cities.push(...data)
+                    const pins = data.map(d => {
+                        console.log('d', d);
+                        const latLng = d.gmaps.split("?q=")[1]
+                        console.log('latLng', latLng);
+                        const [lat, lng] = latLng.split(",")
+                        return turf.point([+lng, +lat], { ...d, color: "#627BC1" });
+                    })
+                    console.log('pins', pins);
+                    map.getSource("points").setData(turf.featureCollection(pins))
+                })
+
+
+
+            map.addSource('points', {
+                'type': 'geojson',
+                'data': turf.featureCollection([])
+            });
+
+            map.addLayer({
+                'id': 'circle',
+                'type': 'circle',
+                'source': 'points',
+                'paint': {
+                    'circle-color': ['get', 'color'],
+                    'circle-radius': 5,
+                    'circle-stroke-width': 1,
+                    'circle-stroke-color': '#ffffff'
+                }
+            });
+
+            map.on('click', 'circle', e => {
+
+                const data = e.features[0].properties
+                const coordinates = e.features[0].geometry.coordinates.slice();
+                const description = `
+                    <div>
+                        <h3>${data['name']}</h3>
+                        <div><b>spring_type: </b>${data['spring_type']}</div>
+                    </div >
+
+                `
+                new mapboxgl.Popup()
+                    .setLngLat(coordinates)
+                    .setHTML(description)
+                    .addTo(map);
+            });
+
+            // Change the cursor to a pointer when the it enters a feature in the 'circle' layer.
+            map.on('mouseenter', 'circle', () => {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+
+            // Change it back to a pointer when it leaves.
+            map.on('mouseleave', 'circle', () => {
+                map.getCanvas().style.cursor = '';
+            });
+
+            // When the mouse leaves the state-fill layer, update the feature state of the
+            // previously hovered feature.
+            map.on('mouseleave', 'state-fills', () => {
+                if (hoveredStateId !== null) {
+                    map.setFeatureState(
+                        { source: 'states', id: hoveredStateId },
+                        { hover: false }
+                    );
+                }
+                hoveredStateId = null;
+            });
+        });
+
+
+        function buildSwitcher(labelText, action, checked = true) {
+
+            const div = document.createElement("div")
+            div.className = "switcher-div"
+
+            const label = document.createElement("label")
+            label.className = "switch"
+
+            const checkbox = document.createElement("input")
+            checkbox.type = "checkbox"
+            checkbox.checked = checked
+            checkbox.addEventListener("input", () => {
+                if (typeof action === "function") {
+                    action(checkbox.checked)
+                }
+            })
+
+            const span = document.createElement("span")
+            span.className = "slider round"
+
+            //const pinColor = colors.find(d => d.name.toLowerCase() === labelText.toLowerCase())
+            const pinColor = 'red'
+
+            const color = document.createElement("div")
+            color.style.width = "10px"
+            color.style.height = "10px"
+            color.style.backgroundColor = pinColor ? pinColor.color : "black"
+            color.style.borderRadius = "10px"
+            color.style.border = "2px solid #2196f3"
+
+
+            const text = document.createElement("div")
+            text.innerText = labelText
+
+            label.appendChild(checkbox)
+            label.appendChild(span)
+
+            div.appendChild(label)
+            //div.appendChild(color)
+            div.appendChild(text)
+
+            return div
+        }
+
+    </script>
+
+</body>
+
+</html>
